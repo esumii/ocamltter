@@ -5,7 +5,7 @@ open Orakuda.Regexp.Infix
 
 module Consumer = Twitter.Auth.Consumer
 
-let auth_file = match Exn.catch ~f:Sys.getenv "HOME" with
+let auth_file = match Exn.catch Sys.getenv "HOME" with
   | `Ok home -> home ^/ ".ocamltter_auths"
   | `Error _exn -> !!% "Env var HOME is not found@."; exit 1
 
@@ -52,13 +52,13 @@ let do_ocaml_misspell tw =
         assert (tw#id = tw'#id);
         assert (tw#text = tw'#text)
     | `Error e ->
-        !!% "ERROR: @[%a@]@." Api11.Error.format_error e
+        !!% "ERROR: @[%a@]@." Api11.Error.format e
     end;
 *)
     match Favorites.create o tw#id with
     | `Ok _ -> !!% "OK@."
     | `Error e ->
-        !!% "ERROR: @[%a@]@." Api11.Error.format_error e
+        !!% "ERROR: @[%a@]@." Api11.Error.format e
   end else 
     !!% "XXX: %Ld: %s@." tw#id text
 
