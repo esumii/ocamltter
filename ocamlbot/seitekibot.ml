@@ -65,16 +65,8 @@ let do_ocaml_misspell tw =
 let rec loop since_id = 
   match Search.tweets o ~count:100 ?since_id
       "\"静的型付け言語\" OR \"静的型つけ言語\" OR \"静的型言語\"" with
-  | `Error (`Http _) -> 
-      prerr_endline "HTTP";
-      Unix.sleep 60;
-      loop since_id
-  | `Error (`Json_parse _) -> 
-      prerr_endline "JSON PARSE";
-      Unix.sleep 60;
-      loop since_id
-  | `Error (`Json e) -> 
-      Format.eprintf "Json_conv: %a@." Json_conv.format_full_error e;
+  | `Error e -> 
+      Format.eprintf "Error: %a@." Error.format e;
       Unix.sleep 60;
       loop since_id
   | `Ok res -> 
@@ -96,4 +88,11 @@ let rec loop since_id =
           Unix.sleep 10;
           loop (Some last_id)
 
-let () = loop None
+let () =
+  loop
+    (try
+      let id = Int64.of_string Sys.argv.(1) in
+      Some id
+    with 
+      Invalid_argument "index out of bounds" ->
+	None)
