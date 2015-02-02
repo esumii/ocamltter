@@ -1,4 +1,5 @@
 open Spotlib.Spot
+open OCamltter_oauth
 open Api_intf
 
 (** {6 HTTP parameters} *)
@@ -31,7 +32,6 @@ val twitter :
   -> string                 (** URL path part *)
   -> (string * string) list (** header *)
   -> (Json.t, [> Error.http | Error.json_parse ]) Result.t
-(* CR jfuruse: We should use [params] instead of [(string * string) list] *)
 
 type 'a json_converter = Json.t -> ('a, Json.t Meta_conv.Error.t) Result.t 
 (** The type of Json to OCaml converter *)
@@ -43,6 +43,7 @@ val api' :
   -> params 
   -> Oauth.t 
   -> 'b result
+(** API call with JSON-to-OCaml conversion *)
 
 val api :
   'b json_converter
@@ -120,7 +121,7 @@ module Arg : sig
 
   val required_status : ('a, string) required_arg
   val required_q      : ('a, string) required_arg
-  val required_id     : ('a, int64) required_arg
+  val required_id     : ('a, int64)  required_arg
 end
 
 (** { 6 Cursor API to OCaml lazy list } *)
@@ -297,12 +298,15 @@ module Search : sig
     Search_tweets.t result
 end
 
-module Streaming : sig  end
+module Streaming : sig  
+  (* empty... means not yet implemented *)
+end
 
-module DirectMessages : sig  end
+module DirectMessages : sig  
+  (* empty... means not yet implemented *)
+end
 
 module FriendsAndFollowers(A : sig val dir : string end) : sig
-  type ids = { ids : int64 list } with conv(json, ocaml)
 
   val ids_stream :
     ?user_id:int64 ->
@@ -314,8 +318,6 @@ module FriendsAndFollowers(A : sig val dir : string end) : sig
     ?user_id:int64 ->
     ?screen_name:string ->
     Oauth.t -> int64 result list
-
-  type users = { users : User.t list; } with conv(json,ocaml)
 
   val list_stream :
     ?user_id:int64 ->
@@ -335,7 +337,6 @@ module FriendsAndFollowers(A : sig val dir : string end) : sig
 end
 
 module Friends : sig
-  type ids = { ids : int64 list; } with conv(json, ocaml)
 
   val ids_stream :
     ?user_id:int64 ->
@@ -346,8 +347,6 @@ module Friends : sig
     ?user_id:int64 ->
     ?screen_name:string ->
     Oauth.t -> int64 result list
-
-  type users = { users : User.t list; } with conv(json, ocaml)
 
   val list_stream :
     ?user_id:int64 ->
@@ -367,8 +366,6 @@ end
 
 module Followers : sig
 
-  type ids = { ids : int64 list; } with conv(json, ocaml)
-
   val ids_stream :
     ?user_id:int64 ->
     ?screen_name:string ->
@@ -379,8 +376,6 @@ module Followers : sig
     ?screen_name:string ->
     Oauth.t -> int64 result list
 
-  type users = { users : User.t list; } with conv(json, ocaml)
-  
   val list_stream :
     ?user_id:int64 ->
     ?screen_name:string ->
@@ -461,11 +456,11 @@ module Friendships : sig
     User.t result
 end
 
-module Users : sig  end
+module Users : sig  
+  (* empty... means not yet implemented *)
+end
 
 module Blocks : sig
-
-  type users = { users : User.t list; } with conv(json, ocaml)
 
   val list_stream :
     ?include_entities:bool ->
@@ -477,8 +472,6 @@ module Blocks : sig
     ?include_entities:bool ->
     ?skip_status:bool ->
     Oauth.t -> User.t result list
-
-  type ids = { ids : int64 list; } with conv(json, ocaml)
 
   val ids_stream :
     Oauth.t -> int64 result Stream.t
@@ -502,7 +495,9 @@ module Blocks : sig
     Json.t result
 end
 
-module SuggestedUsers : sig  end
+module SuggestedUsers : sig  
+  (* empty... means not yet implemented *)
+end
 
 module Favorites : sig
 
@@ -538,13 +533,21 @@ module Favorites : sig
     Tweet.t result
 end
 
-module Lists : sig  end
+module Lists : sig  
+  (* empty... means not yet implemented *)
+end
 
-module SavedSearches : sig  end
+module SavedSearches : sig  
+  (* empty... means not yet implemented *)
+end
 
-module PlacesAndGeo : sig  end
+module PlacesAndGeo : sig  
+  (* empty... means not yet implemented *)
+end
 
-module Trends : sig  end
+module Trends : sig  
+  (* empty... means not yet implemented *)
+end
 
 module SpamReporting : sig
 
@@ -556,7 +559,9 @@ module SpamReporting : sig
 
 end
 
-module OAuth : sig  end
+module OAuth : sig  
+  (* empty... means not yet implemented *)
+end
 
 module Help : sig
 

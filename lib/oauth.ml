@@ -1,7 +1,6 @@
 open Ocaml_conv
 open Spotlib.Spot
 open Util
-open Http
 
 let opt_param name param =
   match param with
@@ -12,18 +11,15 @@ let rng = Cryptokit.Random.device_rng "/dev/random"
 
 let rfc3986_encode s = Http.url_encode s(*Netencoding.Url.encode s*)
 
-let string_of_http_method = function
-  | GET -> "GET"
-  | POST -> "POST"
-
-type signature_method = [ `Hmac_sha1
-                        | `Plaintext
-                        | `Rsa_sha1 of Cryptokit.RSA.key 
-                        ]
+type signature_method = 
+  [ `Hmac_sha1
+  | `Plaintext
+  | `Rsa_sha1 of Cryptokit.RSA.key 
+  ]
 
 let string_of_signature_method : signature_method -> string = function
-  | `Plaintext -> "PLAINTEXT"
-  | `Hmac_sha1 -> "HMAC-SHA1"
+  | `Plaintext  -> "PLAINTEXT"
+  | `Hmac_sha1  -> "HMAC-SHA1"
   | `Rsa_sha1 _ -> "RSA-SHA1"
 
 let normalize_url url =
@@ -87,7 +83,7 @@ let with_oauth_headers
     ~oauth_version
     ?oauth_token 
     ?oauth_signature
-    ?(params = [])
+    other_params
     ~k () =
   k 
   & [ "oauth_signature_method" , string_of_signature_method oauth_signature_method;
@@ -98,7 +94,7 @@ let with_oauth_headers
     ] 
     @ opt_param "oauth_token"     oauth_token 
     @ opt_param "oauth_signature" oauth_signature
-    @ params
+    @ other_params
 
 let signature_base_string ~http_method ~url =
   with_oauth_headers ?oauth_signature:None ~k:(fun params ->
@@ -110,7 +106,7 @@ let signature_base_string ~http_method ~url =
     in
     List.map 
       rfc3986_encode
-      [ string_of_http_method http_method
+      [ Http.string_of_meth http_method
       ; normalize_url url
       ; 
         params 
@@ -132,7 +128,7 @@ let pre_sign
     ~oauth_consumer_key ~oauth_consumer_secret
     ?oauth_token ?oauth_token_secret
     ~oauth_timestamp ~oauth_nonce ~oauth_version
-    ?params
+    ~oauth_other_params
     ~k () =
 
   let key =
@@ -149,8 +145,8 @@ let pre_sign
       ~oauth_consumer_key 
       ?oauth_token
       ~oauth_timestamp ~oauth_nonce ~oauth_version
-      ?params
-       (* ?oauth_token_secret ~oauth_consumer_secret *)
+      oauth_other_params
+      (* ?oauth_token_secret ~oauth_consumer_secret *)
       () 
   in
 
@@ -158,8 +154,8 @@ let pre_sign
 
 let sign = pre_sign ~k:(fun oauth_signature_method signature_base_string key ->
   match oauth_signature_method with
-  | `Plaintext -> rfc3986_encode key
-  | `Hmac_sha1 -> hmac_sha1_hash signature_base_string key
+  | `Plaintext        -> rfc3986_encode key
+  | `Hmac_sha1        -> hmac_sha1_hash signature_base_string key
   | `Rsa_sha1 rsa_key -> rsa_sha1_hash signature_base_string rsa_key)
 
 let _check_signature ~oauth_signature = pre_sign ~k:(fun oauth_signature_method signature_base_string key ->
@@ -190,15 +186,17 @@ let create_oauth_header
     ~oauth_consumer_secret
     ?oauth_token 
     ?oauth_token_secret 
-    params
+    ~oauth_other_params 
+    (* ~non_oauth_params *)
     =
   let oauth_signature =
+    (* non_oauth_params are not taken into account of the signature *)
     sign
       ~http_method ~url
       ~oauth_version ~oauth_signature_method
       ~oauth_timestamp ~oauth_nonce
       ~oauth_consumer_key 
-      ~params
+      ~oauth_other_params
 
       ~oauth_consumer_secret
       ?oauth_token ?oauth_token_secret
@@ -208,7 +206,7 @@ let create_oauth_header
     ~oauth_version ~oauth_signature_method 
     ~oauth_timestamp ~oauth_nonce
     ~oauth_consumer_key
-    ~params
+    oauth_other_params (* (oauth_other_params @ non_oauth_params) *)
     ?oauth_token
     ~oauth_signature 
     ()
@@ -217,10 +215,13 @@ let string_of_protocol = function
   | `HTTP -> "http"
   | `HTTPS -> "https"
 
+(* CR jfuruse: 
+   The distinction of oauth_other_params and non_oauth_params is not meaningful. *)
 let gen_access
     ?handle_tweak
-    ~protocol
-    ~http_method ~host ?port ~path
+    ?(proto=`HTTPS)
+    ~host ?port ~path
+    ~meth: method_non_oauth_params
     ?(oauth_version = "1.0") 
     ?(oauth_signature_method = `Hmac_sha1)
     ?(oauth_timestamp = make_timestamp ()) 
@@ -228,15 +229,15 @@ let gen_access
     ?oauth_token 
     ?oauth_token_secret
     ?(oauth_other_params=[])
-    ?(non_oauth_params=[])
     ~oauth_consumer_key 
     ~oauth_consumer_secret 
     ()
     =
-  let url = string_of_protocol protocol ^ "://" ^ host ^ path in
+  let url = string_of_protocol proto ^ "://" ^ host ^ path in
   let header = 
     create_oauth_header
-      ~http_method ~url
+      ~http_method: (match method_non_oauth_params with `GET _ -> `GET | `POST _ | `POST_MULTIPART _ -> `POST)
+      ~url
       ~oauth_version
       ~oauth_signature_method
       ~oauth_timestamp
@@ -245,20 +246,34 @@ let gen_access
       ~oauth_consumer_secret
       ?oauth_token
       ?oauth_token_secret
-      (oauth_other_params @ non_oauth_params)
+      ~oauth_other_params 
   in
+  let method_params = match method_non_oauth_params with
+    | `GET ps -> `GET (ps @ oauth_other_params)
+    | `POST ps -> `POST (ps @ oauth_other_params)
+    | `POST_MULTIPART psx -> `POST_MULTIPART (psx @ List.map (fun (k,v) -> k, `String v) oauth_other_params)
+  in
+  (* begin let k,v = header in !!% "HEADER %s : %s@." k v; end; *)
   Http.by_curl 
     ?handle_tweak
-    http_method protocol host ?port path ~headers:[header] ~params:non_oauth_params
+    ~proto host ?port path 
+    ~headers:[header] 
+    method_params
 
-let fetch_request_token ?(http_method=POST) = 
-  gen_access ~protocol: `HTTPS ~http_method ?oauth_token:None ?oauth_token_secret:None ~oauth_other_params:[] ~non_oauth_params:[]
+let fetch_request_token ?(post=true) = 
+  gen_access 
+    ~proto: `HTTPS 
+    ~meth: (if post then `POST [] else `GET [])
+    ?oauth_token:None 
+    ?oauth_token_secret:None 
  
-let fetch_access_token ~verif ~oauth_token ~oauth_token_secret ?(http_method=POST) =
-  gen_access ~protocol: `HTTPS ~http_method ~oauth_token ~oauth_token_secret ~oauth_other_params:[("oauth_verifier",verif)] ~non_oauth_params:[]
-
-let access_resource ~oauth_token ~oauth_token_secret ?(http_method=GET) =
-  gen_access ~http_method ~oauth_token ~oauth_token_secret
+let fetch_access_token ~verif ~oauth_token ~oauth_token_secret ?(post=true) =
+  gen_access 
+    ~proto: `HTTPS 
+    ~meth: (if post then `POST [] else `GET [])
+    ~oauth_token 
+    ~oauth_token_secret 
+    ~oauth_other_params:["oauth_verifier",verif]
 
 type t = {
   consumer_key:string; 
@@ -267,11 +282,13 @@ type t = {
   access_token_secret:string;
 } with conv(ocaml)
 
-let access proto oauth meth host path params =
-  access_resource ~protocol:proto ~http_method:meth ~host:host ~path:path
+let access ?proto ~host ?port ~path ~meth:method_params ~oauth_other_params oauth =
+  gen_access ?proto ~host ~path ?port
     ~oauth_consumer_key:oauth.consumer_key
     ~oauth_consumer_secret:oauth.consumer_secret
     ~oauth_token:oauth.access_token
     ~oauth_token_secret:oauth.access_token_secret
-    ~non_oauth_params:params
+    ~oauth_other_params
+    ~meth: method_params
     ()
+

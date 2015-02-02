@@ -5,7 +5,7 @@ open Json_conv
 open Spotlib.Spot
 open Spotlib.Result.Open (* Monads are Result *)
 
-open Http
+open OCamltter_oauth
 open Api_intf
 
 
@@ -47,11 +47,15 @@ type 'a result = ('a, Error.t) Result.t
 
 (** {6 Base communication} *)
 
-(* Api 1.1 seems to requir https *)
-let twitter oauth ?(host="api.twitter.com") meth cmd params =
+let twitter oauth ?(host="api.twitter.com") meth path params =
   (* prerr_endline cmd; *)
   (* List.iter (fun (k,v) -> Format.eprintf "%s=%s@." k v) params; *)
-  Auth.access `HTTPS oauth meth host cmd params >>= fun s -> 
+  Oauth.access 
+    ~host
+    ~path
+    ~meth:( match meth with `GET -> `GET [] | `POST -> `POST [] )
+    ~oauth_other_params:params 
+    oauth >>= fun s -> 
   Result.catch (fun ~fail -> try Json.parse s with e -> fail (`Json_parse (e,s)))
       
 
@@ -111,8 +115,8 @@ module Arg = struct
       parameters, then give the final set of parameters to [consumer] *)
 
   (* Being puzzled? Yes so was I... *)
-  let get  post pathfmt optf = run optf & api post GET  pathfmt
-  let post post pathfmt optf = run optf & api post POST pathfmt
+  let get  post pathfmt optf = run optf & api post `GET  pathfmt
+  let post post pathfmt optf = run optf & api post `POST pathfmt
 
   (** {7 General optional argument generators } *)
 
@@ -460,7 +464,7 @@ end) = struct
 
   let ids_stream, ids = 
     let f k = 
-      Cursor.streaming GET k
+      Cursor.streaming `GET k
         ids_of_json 
         (fun x -> x.ids)
         (!% "%s/ids.json" A.dir)
@@ -476,7 +480,7 @@ end) = struct
 
   let list_stream, list =
     let f k =
-      Cursor.streaming GET k
+      Cursor.streaming `GET k
         users_of_json
         (fun x -> x.users)
         (!% "%s/list.json" A.dir)
@@ -513,7 +517,7 @@ module Friendships = struct
   type ts = t list with conv(json, ocaml)
 
   let lookup ?screen_name ?user_id oauth =
-    api ts_of_json GET "friendships/lookup.json"
+    api ts_of_json `GET "friendships/lookup.json"
       [ "screen_name", 
         Option.map (String.concat ",") screen_name
 
@@ -527,7 +531,7 @@ module Friendships = struct
   } with conv(json, ocaml)
 
   let gen_io name k = 
-    Cursor.streaming GET k
+    Cursor.streaming `GET k
       ids_of_json 
       (fun x -> x.ids)
       (!% "friendships/%s.json" name)
@@ -562,7 +566,7 @@ module Blocks = struct
 
   let list_stream, list = 
     let f k = 
-      Cursor.streaming GET k
+      Cursor.streaming `GET k
         users_of_json 
         (fun x -> x.users)
         "blocks/list.json"
@@ -578,7 +582,7 @@ module Blocks = struct
 
   let ids_stream, ids = 
     let f k = 
-      Cursor.streaming GET k
+      Cursor.streaming `GET k
         ids_of_json 
         (fun x -> x.ids)
         "blocks/ids.json"

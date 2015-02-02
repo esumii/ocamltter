@@ -4,12 +4,28 @@ open Util
 
 exception Http_error of string
 
-let url_encode s =
+let url_encode' s =
   let ss = string_foldr (fun c store -> match c with
     | 'a'..'z' | 'A'..'Z' | '0'..'9' | '-' | '.' | '_' | '~' as c -> String.make1 c :: store
     | c -> ("%" ^ to_hex (int_of_char c)) :: store) s []
   in
   String.concat "" (ss)
+
+let url_encode s =
+  let b = Buffer.create (String.length s * 2) in
+  String.iter (function 
+    | 'a'..'z' | 'A'..'Z' | '0'..'9' | '-' | '.' | '_' | '~' as c -> 
+        Buffer.add_char b c
+    | c -> 
+        Buffer.add_char b '%';
+        Buffer.add_string b @@ to_hex (int_of_char c)) s;
+  Buffer.contents b
+
+let url_encode s =
+  let e1 = url_encode' s in
+  let e2 = url_encode s in
+  assert (e1 = e2);
+  e2
 
 let html_decode s =
   let rec aux store = function
@@ -27,8 +43,17 @@ type header = {
     fields : (string, string) Hashtbl.t
   }
 
+type headers = (string * string) list
 type params = (string * string) list
-type meth = GET | POST
+type params2 = (string * [ `String of string
+                         | `File   of string (** file contents *) ]) list
+
+type meth = [ `GET | `POST ]
+
+let string_of_meth = function
+  | `GET ->  "GET"
+  | `POST -> "POST"
+
 let params2string ps =
   String.concat "&" @@ List.map (fun (k,v) -> k^"="^url_encode v) ps
 
@@ -51,14 +76,14 @@ let conn ?(port=80) hostname meth ?headers  path ps ?(rawpost="") f =
   in
   let msg =
     match meth with
-    | GET ->
+    | `GET ->
         assert (rawpost="");
 	let path = if ps<>[] then path ^ "?" ^ params2string ps else path in
 	!%"GET %s HTTP/1.0\r\n" path
 	^ hds
 	^ "Host: " ^ hostname ^ "\r\n"
 	^ "\r\n"
-    | POST ->
+    | `POST ->
 	let s = params2string ps ^ rawpost in
 	!%"POST %s HTTP/1.0\r\n" path
 	^ "Host: " ^ hostname ^ "\r\n"
@@ -97,7 +122,12 @@ type error =
   | `Curl of Curl.curlCode * int * string (** libcURL error *)
   ]
 
-let by_curl' ?handle_tweak meth proto hostname ?port path ~params:ps ~headers =
+let string_of_error = function
+  | `Http (n, s) -> !%"Http error %d: %s" n s
+  | `Curl (cc, n, s) -> !%"Curl (%s) %d: %s" (Curl.strerror cc) n s
+
+let by_curl_gen ?handle_tweak ?(proto=`HTTPS) hostname ?port path ~headers meth_params =
+  let open Curl in
   let h = new Curl.handle in
   (* h#set_verbose true; *)
   let proto_string = match proto with `HTTP -> "http" | `HTTPS -> "https" in
@@ -109,21 +139,29 @@ let by_curl' ?handle_tweak meth proto hostname ?port path ~params:ps ~headers =
   in
   let headers = ("Host", hostname) :: headers in
   (* DEBUG List.iter (fun (k,v) -> Printf.eprintf "%s: %s\n%!" k v) headers; *)
-  begin match meth with
-  | GET ->
-      let url = if ps<>[] then url ^ "?" ^ params2string ps else url in
+  begin match meth_params with
+  | `GET params ->
+      let url = if params <> [] then url ^ "?" ^ params2string params else url in
       h#set_url url;
       h#set_post false;
       h#set_httpheader (List.map (fun (k,v) -> !% "%s: %s" k v) headers);
-  | POST ->
+  | `POST params ->
       h#set_url url;
       h#set_post true;
-      let s = params2string ps in
+      let s = params2string params in
       h#set_postfields s;
         (* set_postfields of OCurl 0.5.3 has a bug. 
            We need explicit set_postfieldsize to workaround it.
         *)
       h#set_postfieldsize (String.length s);
+      h#set_httpheader (List.map (fun (k,v) -> !% "%s: %s" k v) headers);
+  | `POST_MULTIPART params ->
+      h#set_url url;
+      h#set_post true;
+      h#set_httppost 
+        (List.map (function
+          | (k, `File path) -> CURLFORM_FILE (k, path, DEFAULT)
+          | (k, `String s) -> CURLFORM_CONTENT (k, s, DEFAULT)) params);
       h#set_httpheader (List.map (fun (k,v) -> !% "%s: %s" k v) headers);
   end;
   
@@ -141,9 +179,9 @@ let by_curl' ?handle_tweak meth proto hostname ?port path ~params:ps ~headers =
   in	
   ok200 (code, Buffer.contents buf)
 
-let by_curl ?handle_tweak meth proto hostname ?port path ~params:ps ~headers =
+let by_curl ?handle_tweak ?proto hostname ?port path ~headers meth_params =
   try 
-    by_curl' ?handle_tweak meth proto hostname ?port path ~params:ps ~headers 
+    by_curl_gen ?handle_tweak ?proto hostname ?port path ~headers meth_params
   with
   | Curl.CurlException (curlCode, int, mes) ->
       `Error (`Curl (curlCode, int, mes))

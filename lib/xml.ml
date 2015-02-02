@@ -9,6 +9,8 @@ type xml =
 let show xml =
   let indent d = String.make (2*d) ' ' in
   let rec iter d = function
+    | Tag (name,attrs,[]) ->
+	indent d ^ "<"^name^" "^slist " " (fun(k,v)->k^"="^v) attrs^"/>\n"
     | Tag (name,attrs,body) ->
 	indent d ^ "<"^name^" "^slist " " (fun(k,v)->k^"="^v) attrs^">\n"
 	^slist "\n" (iter (d+1)) body
@@ -19,44 +21,45 @@ let show xml =
 	    
 let whitespace =
   let whites = [' '; '\t'; '\n'; '\r'] in
-  (many @@ char_when (fun c -> List.mem c whites))
+  (many @@ char_when "whites" (fun c -> List.mem c whites))
 
 let ident =
   let igs = ['<'; '>'; '?'; '/'; ' '; '\t'; '\r'; '\n'] in
   whitespace >>
-  (many1 @@ char_when (fun c -> List.mem c igs = false)) >>=
+  (many1 @@ char_when "not xml nor whites" (fun c -> List.mem c igs = false)) >>=
   (return $ string_of_chars)
 
 let pattr : attr t =
   let k_char c =
     List.mem c ['='; '<'; '>'; '?'; '/'; ' '; '\t'; '\r'; '\n'] = false
   in
-  let ident0 = many (char_when ((<>) '\"')) >>= (return $ string_of_chars) in
+  let ident0 = many (char_when "not '\"'" ((<>) '\"')) >>= (return $ string_of_chars) in
     whitespace >> make_ident k_char >>= fun k -> char '=' >> char '\"' >>
     ident0 <.< char '\"' >>= fun v -> return (k,v)
 
 let pcdata =
   let igs = ['<'; '>'] in
   whitespace >>
-  (many1 @@ char_when (fun c -> List.mem c igs = false)) >>= fun cs ->
+  (many1 @@ char_when "not < nor >" (fun c -> List.mem c igs = false)) >>= fun cs ->
     return @@ PCData(string_of_chars cs)
     
 let parser_ =
     let rec iter () =
-      let top = char '<' >> char '?' >> many ident >> char '?' >> char '>'
-	  >>= fun _ -> iter()
+      let top = char '<' >> char '?' >> ident >>= fun _xml ->
+	many pattr <.< whitespace <.< char '?' <.< char '>' >>= fun _attrs ->
+	iter ()
       in
       let tag1 = char '<' >> ident >>= fun name ->
 	many pattr <.< char '>' >>= fun attrs ->
 	many (iter()) >>= fun children ->
-	whitespace >> char '<' >> char '/' >> ident <.< char '>' >>= fun _name' ->
+	whitespace >> char '<' >> char '/' >> ident <.< char '>' >>= fun _name' -> (* CR jfuruse: tag closing is not checked *)
 	return (Tag(name, attrs, children))
       in
       let tag2 = char '<' >> ident >>= fun name ->
-	many pattr <.< char '/' <.< char '>' >>= fun attrs ->
+	many pattr <.< whitespace <.< char '/' <.< char '>' >>= fun attrs ->
 	return (Tag(name, attrs, []))
       in
-      whitespace >> (top <|> tag1^?"tag1" <|> tag2^?"tag2" <|> pcdata)
+      whitespace >> (top <|> (tag1^?"tag1") <|> (tag2^?"tag2") <|> pcdata)
     in
     iter() ^? "xml"
     
