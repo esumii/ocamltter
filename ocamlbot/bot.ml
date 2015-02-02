@@ -1,25 +1,43 @@
 open Spotlib.Spot
-open Twitter
+open OCamltter_oauth
+open OCamltter_twitter
 open Api11
 open Orakuda.Regexp.Infix
 
-module Consumer = Twitter.Auth.Consumer
-
-let auth_file = match Exn.catch ~f:Sys.getenv "HOME" with
+let auth_file = match Exn.catch Sys.getenv "HOME" with
   | `Ok home -> home ^/ ".ocamltter_auths"
   | `Error _exn -> !!% "Env var HOME is not found@."; exit 1
 
 let () =
   if not & File.Test._e auth_file then begin
-    Ocauth.Auth.save_dummy auth_file;
+    Ocauth.Auth.save auth_file Ocauth.Auth.dummy;
     !!% "No auth table found. Created a dummy file: %s@." auth_file;
     exit 1
   end
 
 let () = prerr_endline "getting oauth..."
-let app, user = 
-  Ocauth.Auth.find (Ocauth.Auth.load auth_file) ~app:"ocamlbot" ~user:"ocamlbot"
-let o = Ocauth.Auth.oauth app user
+
+let auths = Ocauth.Auth.load auth_file
+
+let { Ocauth.Auth.consumer } = match Ocauth.Auth.find_app auths "ocamlbot" with
+  | Some app -> app
+  | None -> failwith "no ocamlbot app found"
+
+module Oauthx = Oauth_ex.Make(struct
+  include OCamltter_twitter.Conf
+  let app = consumer
+end)
+
+let o : Oauth.t =
+  match Ocauth.Auth.find_user auths ~app:"ocamlbot" ~user:"ocamlbot" with
+  | `Found o -> o
+  | `NoApp -> assert false
+  | `NoUser _ ->
+      let _res, acc_token = Oauthx.authorize_cli_interactive () in
+      Ocauth.Auth.add_user auths ~app:"ocamlbot" ~user:"ocamlbot" acc_token;
+      Ocauth.Auth.save auth_file auths;
+      Oauthx.oauth Oauthx.Conf.app acc_token
+    
 let () = prerr_endline "oauth done"
 
 let is_ocaml_misspell = 
@@ -47,27 +65,19 @@ let do_ocaml_misspell tw =
         assert (tw#id = tw'#id);
         assert (tw#text = tw'#text)
     | `Error e ->
-        !!% "ERROR: @[%a@]@." Api11.Error.format_error e
+        !!% "ERROR: @[%a@]@." Api11.Error.format e
     end;
     match Favorites.create o tw#id with
     | `Ok _ -> !!% "OK@."
     | `Error e ->
-        !!% "ERROR: @[%a@]@." Api11.Error.format_error e
+        !!% "ERROR: @[%a@]@." Api11.Error.format e
   end else 
     !!% "XXX: %s@." text
 
 let rec loop since_id = 
   match Search.tweets o ~count:100 ?since_id "ocaml" with
-  | `Error (`Http _) -> 
-      prerr_endline "HTTP";
-      Unix.sleep 600;
-      loop since_id
-  | `Error (`Json_parse _) -> 
-      prerr_endline "JSON PARSE";
-      Unix.sleep 600;
-      loop since_id
-  | `Error (`Json e) -> 
-      Format.eprintf "Json_conv: %a@." Json_conv.format_full_error e;
+  | `Error e ->
+      Format.eprintf "%a@." Api11.Error.format e;
       Unix.sleep 600;
       loop since_id
   | `Ok res -> 

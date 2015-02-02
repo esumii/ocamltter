@@ -1,4 +1,5 @@
-open Twitter;;
+open OCamltter_oauth
+open OCamltter_twitter
 open Util;;
 open Http;;
 open Api11;;
@@ -14,13 +15,20 @@ let print_string_literal p s = Format.print_string ("\"" ^ s ^ "\"");;
 
 let () = config_file :=
   match maybe Sys.getenv "HOME" with
-  | Inl home -> home ^ "/.ocamltter"
-  | Inr e -> ".ocamltter"
+  | Inl home -> home ^ "/.ocamltter.toplevel.auth"
+  | Inr e -> ".ocamltter.toplevel.auth"
 
 let () = Format.eprintf "Using %s@." !config_file
 
 let o = setup();;
-(* start_polling ();; *)
+start_polling ();;
 
 open Api11;;
 
+(* You can override the settings of oConfig.ml *)
+(*
+OConfig.(
+  watching_words := [];
+  talk := false
+);;
+*)

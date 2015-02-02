@@ -1,11 +1,10 @@
-OCAMLFLAGS = -thread
+OCAMLINCLUDES = $(dir . ../lib ../twitter)
 
-OCAMLINCLUDES = $(dir . ../lib)
+OCAML_LIBS= ../lib/oCamltter_oauth ../twitter/oCamltter_twitter
+OCamlRequire(../lib/oCamltter_oauth.cmo)
+OCamlRequire(../twitter/oCamltter_twitter.cmo)
 
-OCAML_LIBS= ../lib/twitter
-OCamlRequire(../lib/twitter.cmo)
-
-OCAMLPACKS[] += orakuda
+OCAMLPACKS[]  += orakuda
 CAMLP4PACKS[] += orakuda
 
 OCAMLDEPFLAGS= -syntax camlp4o -package meta_conv.syntax,orakuda.syntax
@@ -15,6 +14,7 @@ FILES[] =
     ocauth
     bot
 
+# ocamlbot is not installed, since without any modification, it requires @ocamlbot authorization
 NO_INSTALL=true
 MyOCamlProgram(ocamlbot, $(FILES))
 MyOCamlProgram(ocamlrtrt, ocauth rtrt)

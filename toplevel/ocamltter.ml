@@ -1,136 +1,42 @@
-open Ocaml_conv
 open Spotlib.Spot
 module Spot = Spotlib.Spot
-open Twitter
+open OCamltter_oauth
 open Util
+open OCamltter_twitter
 module TTS = GoogleTTS
 
-module Consumer = Auth.Consumer
+module Oauth = struct
+  include Oauth_ex.Make(struct
+    include OCamltter_twitter.Conf
+    let app = { Oauth_ex.Consumer.key = "vS0nKAS6ieWL76zZaQgF4A";
+                secret = "XHa1ZiPcNRsYKw4mdIv8wHUiNulpBFxKT1ntXXuJgo"; }
+  end)
 
-module Auth = struct
-
-  module App = struct
-    type t = { name : string; consumer : Consumer.t } with conv(ocaml)
+  let load auth_file =
+    match Ocaml.load_with_exn Access_token.t_of_ocaml auth_file with
+    | [a] -> a
+    | _ -> assert false
   
-    let dummy = { name = "dummy app";
-                  consumer = Consumer.dummy }
+  let get_acc_token auth_file =
+    try load auth_file with
+    | _ -> 
+        let _res, acc_token = authorize_cli_interactive () in
+        Ocaml.save_with Access_token.ocaml_of_t ~perm:0o600 auth_file [acc_token];
+        acc_token
   
-    let ocamltter = 
-      { name = "ocamltter";
-        consumer = {
-          Consumer.key = "vS0nKAS6ieWL76zZaQgF4A";
-          secret = "XHa1ZiPcNRsYKw4mdIv8wHUiNulpBFxKT1ntXXuJgo";
-        }
-      }
-  end
-  
-  module User = struct
-     type t = { token        : string;
-                token_secret : string;
-                verif        : string } with conv(ocaml)
-  
-    let dummy = { token = "123456789-Base64DataHereBase64DataHereBase64DataHe";
-                  token_secret = "Base64DataHereBase64DataHereBase64DataHer";
-                  verif = "9876543 (digit given from twitter auth page)" }
-  end
-
-  open Twitter.Auth
-
-  type ('a,'b) hashtbl = ('a,'b) Hashtbl.t
-
-  type t = { app: App.t; users: (string, User.t) hashtbl } with conv(ocaml)
-  type tbl = (App.t, (string, User.t) hashtbl) Hashtbl.t
-
-  let dummy = { app = App.dummy;
-                users = Hashtbl.of_list 1 [ "dummy user", User.dummy ] }
-
-  let oauth app user = 
-    { Oauth.consumer_key  = app.App.consumer.Consumer.key;
-      consumer_secret     = app.App.consumer.Consumer.secret;
-      access_token        = user.User.token;
-      access_token_secret = user.User.token_secret;
-    }
-
-  let load path = 
-    let tbl = Hashtbl.create 17 in
-    Ocaml.load_with_exn t_of_ocaml path
-    |> List.iter (fun t -> Hashtbl.add tbl t.app t.users)
-    |> fun () -> tbl
-
-  let save path tbl = 
-    Hashtbl.to_list tbl
-    |> List.map (fun (k,v) -> { app=k; users= v })
-    |> Ocaml.save_with ocaml_of_t ~perm:0o600 path
-
-  let save_dummy path =
-    if Sys.file_exists path then failwithf "%s: already exists" path;
-    save path & Hashtbl.of_list 1 [dummy.app, dummy.users]
-
-  let find (tbl:tbl) app user_name =
-    Hashtbl.find_all tbl app
-    |> Hashtbl.concat
-    |> fun users -> Hashtbl.find_all users user_name
-
-  let authorize app (_, verif as verified_token : VerifiedToken.t) = 
-    let app_consumer = app.App.consumer in
-    match Auth.fetch_access_token app_consumer verified_token with
-    | `Ok (username, token) ->
-        let oauth = Auth.oauth app_consumer (token, verif) in
-        username, { User.token = oauth.Oauth.access_token;
-                    token_secret = oauth.Oauth.access_token_secret;
-                    verif = verif }
-    | `Error (`Http (st, err)) ->
-        failwithf "oauth http failed(%d): %s" st err
-  
-  let authorize_interactive app = 
-    match Auth.fetch_request_token app.App.consumer with
-    | `Ok (url, req_resp_token) ->
-        print_endline & "Please grant access to " ^ app.App.name ^ " and get a PIN at :";
-        print_endline & "  " ^ url;
-        print_string "Give me a PIN: "; flush stdout;
-        let verif = read_line () in
-        let username, t = authorize app (req_resp_token, verif) in
-        print_endline ("Grant Success! Hello, @"^username^" !");
-        username, t
-    | `Error (`Http (st, err)) ->
-        failwithf "oauth http failed(%d): %s" st err
-
-  module Single = struct
-    (** It forgets username and consumer *)
-    let save path t = 
-      open_out_with path (fun ch ->
-        output_string ch & String.concat "\n" [ t.User.token;
-                                                t.User.token_secret;
-                                                t.User.verif;
-                                                "" ])
-  
-    let load path = open_in_with path & fun ch ->
-      let token    = input_line ch in 
-      let secret   = input_line ch in 
-      let verif    = input_line ch in
-      { User.token   = token;
-        token_secret = secret;
-        verif        = verif }
-  
-    let oauth path app = 
-      let user = try load path with _ -> 
-        let _username, t = authorize_interactive app in
-        save path t;
-        t
-      in
-      oauth app user
-  end
-
+  let get auth_file =
+    let acc_token = get_acc_token auth_file in
+    oauth Conf.app acc_token
 end
 
-let config_file = ref "Assign a conf filename."
+let config_file = ref "ocamltter.toplevel.auth"
 
 let cached_oauth = ref None
 
 let get_oauth () = match !cached_oauth with
   | Some oauth -> oauth
   | None ->
-      let oauth = Auth.Single.oauth !config_file Auth.App.ocamltter in
+      let oauth = Oauth.get !config_file in
       cached_oauth := Some oauth;
       oauth
       
@@ -173,27 +79,15 @@ end = struct
     Queue.push tw cache
 end
 
-exception Error of [`Http of int * string
-                   | `Json of Json.t Meta_conv.Error.t 
-                   | `Json_parse of exn * string
-                   ]
+exception Error of Api11.Error.t
 
-let default def v = v |> Spot.result id (function
-  | `Http (code, mes) ->
-      Format.eprintf "HTTP error %d: %s@." code mes;
-      def
-  | `Json e ->
-      Format.eprintf "@[JSON error:@ %a@]@."
-        (Meta_conv.Error.format Json_conv.format) e;
-      def
-  | `Json_parse (exn, s) ->
-      Format.eprintf "@[JSON error: %s@ %s@]@."
-        (Printexc.to_string exn)
-        s;
-      def
-  )
+let default def v = v |> Result.result id (fun e ->
+  Format.eprintf "%a@." Api11.Error.format e;
+  def)
 
-let from_Ok x = x |> Spot.from_Ok (fun e -> Error e)
+let from_Ok = function
+  | `Ok v -> v
+  | `Error e -> raise (Error e)
 
 let from_Some = function
   | Some v -> v
@@ -217,11 +111,11 @@ let get_timeline ?(c=20) ?since_id verbose =
           (print_endline (!%"%d" (List.length ts)); flush stdout);
         ts
       in
-      list_concatmap search OConfig.watching_words
+      list_concatmap search !OConfig.watching_words
     in
     let tl2 =
       if verbose then (print_endline "loading..."; flush stdout);
-      List.filter OConfig.filter
+      List.filter !OConfig.filter
       & default []
       & Timelines.home_timeline ~count:c (get_oauth ())
     in

@@ -1,5 +1,6 @@
-name="ocamltter"
+name = "ocamltter"
+description = "OCamltter Twitter CLI client"
+
 version="@version@"
-description="OCamltter Twitter client"
-requires="cryptokit,str,meta_conv,tiny_json_conv,spotlib,curl,ocaml_conv,twitter"
+requires="ocamltter_twitter"
 
