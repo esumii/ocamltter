@@ -1,9 +1,8 @@
 open Spotlib.Spot
-open Twitter
+open OCamltter_oauth
+open OCamltter_twitter
 open Api11
 open Orakuda.Regexp.Infix
-
-module Consumer = Twitter.Auth.Consumer
 
 let auth_file = match Exn.catch Sys.getenv "HOME" with
   | `Ok home -> home ^/ ".ocamltter_auths"
@@ -11,15 +10,34 @@ let auth_file = match Exn.catch Sys.getenv "HOME" with
 
 let () =
   if not & File.Test._e auth_file then begin
-    Ocauth.Auth.save_dummy auth_file;
+    Ocauth.Auth.save auth_file Ocauth.Auth.dummy;
     !!% "No auth table found. Created a dummy file: %s@." auth_file;
     exit 1
   end
 
 let () = prerr_endline "getting oauth..."
-let app, user = 
-  Ocauth.Auth.find (Ocauth.Auth.load auth_file) ~app:"ocamltter" ~user:"seitekibot"
-let o = Ocauth.Auth.oauth app user
+
+let auths = Ocauth.Auth.load auth_file
+
+let { Ocauth.Auth.consumer } = match Ocauth.Auth.find_app auths "ocamltter" with
+  | Some app -> app
+  | None -> failwith "no ocamltter app found"
+
+module Oauthx = Oauth_ex.Make(struct
+  include OCamltter_twitter.Conf
+  let app = consumer
+end)
+
+let o : Oauth.t =
+  match Ocauth.Auth.find_user auths ~app:"ocamltter" ~user:"seitekibot" with
+  | `Found o -> o
+  | `NoApp -> assert false
+  | `NoUser _ ->
+      let _res, acc_token = Oauthx.authorize_cli_interactive () in
+      Ocauth.Auth.add_user auths ~app:"ocamltter" ~user:"seitekibot" acc_token;
+      Ocauth.Auth.save auth_file auths;
+      Oauthx.oauth Oauthx.Conf.app acc_token
+    
 let () = prerr_endline "oauth done"
 
 let is_ocaml_misspell =
@@ -66,7 +84,7 @@ let rec loop since_id =
   match Search.tweets o ~count:100 ?since_id
       "\"静的型付け言語\" OR \"静的型つけ言語\" OR \"静的型言語\"" with
   | `Error e -> 
-      Format.eprintf "Error: %a@." Error.format e;
+      Format.eprintf "Error: %a@." Api11.Error.format e;
       Unix.sleep 60;
       loop since_id
   | `Ok res -> 
