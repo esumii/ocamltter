@@ -1,23 +1,44 @@
 open Spotlib.Spot
-open Twitter
+open OCamltter_oauth
+open OCamltter_twitter
 open Api11
+open Orakuda.Regexp.Infix
 
 (* begin: copied from bot.ml *)
-let auth_file = match Exn.catch ~f:Sys.getenv "HOME" with
+let auth_file = match Exn.catch Sys.getenv "HOME" with
 | `Ok home -> home ^/ ".ocamlrtrt_auths"
 | `Error _exn -> !!% "Env var HOME is not found@."; exit 1
 
 let () =
   if not & File.Test._e auth_file then begin
-    Ocauth.Auth.save_dummy auth_file;
+    Ocauth.Auth.save auth_file Ocauth.Auth.dummy;
     !!% "No auth table found. Created a dummy file: %s@." auth_file;
     exit 1
   end
 
 let () = prerr_endline "getting oauth..."
-let app, user = 
-  Ocauth.Auth.find (Ocauth.Auth.load auth_file) ~app:"ocamlrtrt" ~user:"esumii"
-let o = Ocauth.Auth.oauth app user
+
+let auths = Ocauth.Auth.load auth_file
+
+let { Ocauth.Auth.consumer } = match Ocauth.Auth.find_app auths "ocamlrtrt" with
+  | Some app -> app
+  | None -> failwith "no ocamlrtrt app found"
+
+module Oauthx = Oauth_ex.Make(struct
+  include OCamltter_twitter.Conf
+  let app = consumer
+end)
+
+let o : Oauth.t =
+  match Ocauth.Auth.find_user auths ~app:"ocamlrtrt" ~user:"esumii" with
+  | `Found o -> o
+  | `NoApp -> assert false
+  | `NoUser _ ->
+      let _res, acc_token = Oauthx.authorize_cli_interactive () in
+      Ocauth.Auth.add_user auths ~app:"ocamlrtrt" ~user:"esumii" acc_token;
+      Ocauth.Auth.save auth_file auths;
+      Oauthx.oauth Oauthx.Conf.app acc_token
+    
 let () = prerr_endline "oauth done"
 (* end: copied from bot.ml *)
 
@@ -31,11 +52,13 @@ let foreach l f = List.iter f l
 let () =
   foreach (unOk r) (fun t1 ->
     Format.eprintf "[DEBUG] t1#id = %Ld@." t1#id;
+(*
     let lim = Help.rate_limit_status o in
     Format.eprintf "[DEBUG] got limit@.";
     Format.eprintf "[DEBUG] lim#resources#application#rate_limit_status = %a@." (Ocaml.format_with Api_intf.Rate_limit_status.ocaml_of_limit) (unOk lim)#resources#application#rate_limit_status;
     Format.eprintf "[DEBUG] lim#resources#statuses#retweets = %a@." (Ocaml.format_with Api_intf.Rate_limit_status.ocaml_of_limit) (unOk lim)#resources#statuses#retweets;
     Format.eprintf "[DEBUG] lim#resources#statuses#user_timeline = %a@." (Ocaml.format_with Api_intf.Rate_limit_status.ocaml_of_limit) (unOk lim)#resources#statuses#user_timeline;
+*)
     let rts = Tweets.retweets o t1#id in
     Format.eprintf "[DEBUG] got %d retweets of tweet@." (List.length (unOk rts));
     foreach (unOk rts) (fun t2 ->
