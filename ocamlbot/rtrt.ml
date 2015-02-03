@@ -2,7 +2,7 @@ open Spotlib.Spot
 open OCamltter_oauth
 open OCamltter_twitter
 open Api11
-open Orakuda.Regexp.Infix
+open Ppx_orakuda.Regexp.Infix
 
 (* begin: copied from bot.ml *)
 let auth_file = match Exn.catch Sys.getenv "HOME" with
