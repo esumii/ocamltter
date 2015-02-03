@@ -2,7 +2,7 @@ open Spotlib.Spot
 open OCamltter_oauth
 open OCamltter_twitter
 open Api11
-open Orakuda.Regexp.Infix
+open Ppx_orakuda.Regexp.Infix
 
 let auth_file = match Exn.catch Sys.getenv "HOME" with
   | `Ok home -> home ^/ ".ocamltter_auths"
@@ -44,7 +44,7 @@ let is_ocaml_misspell =
 (*
   fun _ -> true
 *)
-  let rex = <:m<静的型言語|静的型つけ言語|静的型付け言語>> in
+  let rex = {m|静的型言語|静的型つけ言語|静的型付け言語|m} in
   let rec loop text = 
     begin match text =~ rex with
     | None -> false
